@@ -1,0 +1,5 @@
+1- Load a file
+2- Pad the signal if necessary
+3- Extracting log spectogram from signal (usign lebrosa library)
+4- Normalise spectogram
+5- Save the normalized spectogram
