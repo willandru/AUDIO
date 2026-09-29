@@ -7,17 +7,55 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
+# ============================================================
+# PortAudio
+# ============================================================
+
 add_subdirectory(
     externals/portaudio
     ${CMAKE_BINARY_DIR}/portaudio
     EXCLUDE_FROM_ALL
 )
 
-add_executable(AUDIO
-    src/main.cpp
+# ============================================================
+# GLFW
+# ============================================================
+
+add_subdirectory(
+    externals/glfw-3.4
+    ${CMAKE_BINARY_DIR}/glfw
+    EXCLUDE_FROM_ALL
 )
 
-target_link_libraries(AUDIO PRIVATE portaudio)
+# ============================================================
+# AUDIO
+# ============================================================
+
+add_executable(AUDIO
+    src/main.cpp
+    externals/glad/src/glad.c
+)
+
+# ============================================================
+# Include directories
+# ============================================================
+
+target_include_directories(AUDIO PRIVATE
+    externals/glad/include
+)
+
+# ============================================================
+# Libraries
+# ============================================================
+
+target_link_libraries(AUDIO PRIVATE
+    portaudio
+    glfw
+)
+
+# ============================================================
+# PortAudio DLL
+# ============================================================
 
 add_custom_command(TARGET AUDIO POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
