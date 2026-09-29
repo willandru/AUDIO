@@ -28,6 +28,22 @@ add_subdirectory(
 )
 
 # ============================================================
+# FreeType
+# ============================================================
+
+set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BZIP2 ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_PNG ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
+
+add_subdirectory(
+    externals/ft2143/freetype-2.14.3
+    ${CMAKE_BINARY_DIR}/freetype
+    EXCLUDE_FROM_ALL
+)
+
+# ============================================================
 # AUDIO
 # ============================================================
 
@@ -51,6 +67,7 @@ target_include_directories(AUDIO PRIVATE
 target_link_libraries(AUDIO PRIVATE
     portaudio
     glfw
+    freetype
 )
 
 # ============================================================
