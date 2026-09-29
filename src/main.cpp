@@ -1,24 +1,32 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
-#include <cmath>
 #include <iostream>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <portaudio.h>
 
-constexpr int WINDOW_WIDTH = 1280;
-constexpr int WINDOW_HEIGHT = 720;
-
 constexpr int SAMPLE_RATE = 44100;
 constexpr int FRAMES_PER_BUFFER = 256;
 constexpr int CHANNELS = 1;
 
-constexpr float RMS_SCALE = 0.05f;
+constexpr int WAVEFORM_SAMPLES = 1024;
+
+constexpr float WAVEFORM_SCALE = 6.0f;
 
 struct AudioData
 {
-    std::atomic<double> rms{0.0};
+    std::array<std::atomic<float>, WAVEFORM_SAMPLES> samples;
+    std::atomic<unsigned int> writeIndex{0};
+
+    AudioData()
+    {
+        for (auto& sample : samples)
+        {
+            sample.store(0.0f);
+        }
+    }
 };
 
 int audioCallback(
@@ -33,28 +41,39 @@ int audioCallback(
     (void)timeInfo;
     (void)statusFlags;
 
-    auto* audioData = static_cast<AudioData*>(userData);
-    const auto* samples = static_cast<const float*>(inputBuffer);
+    auto* audioData =
+        static_cast<AudioData*>(userData);
 
-    if (samples == nullptr || framesPerBuffer == 0)
+    const auto* input =
+        static_cast<const float*>(inputBuffer);
+
+    if (input == nullptr)
     {
-        audioData->rms.store(0.0);
         return paContinue;
     }
 
-    double sumSquares = 0.0;
+    unsigned int writeIndex =
+        audioData->writeIndex.load(
+            std::memory_order_relaxed
+        );
 
-    for (unsigned long i = 0; i < framesPerBuffer; ++i)
+    for (unsigned long i = 0;
+         i < framesPerBuffer;
+         ++i)
     {
-        const double sample = samples[i];
-        sumSquares += sample * sample;
+        audioData->samples[writeIndex].store(
+            input[i],
+            std::memory_order_relaxed
+        );
+
+        writeIndex =
+            (writeIndex + 1) % WAVEFORM_SAMPLES;
     }
 
-    const double rms = std::sqrt(
-        sumSquares / static_cast<double>(framesPerBuffer)
+    audioData->writeIndex.store(
+        writeIndex,
+        std::memory_order_relaxed
     );
-
-    audioData->rms.store(rms);
 
     return paContinue;
 }
@@ -81,9 +100,12 @@ void main()
 }
 )";
 
-GLuint compileShader(GLenum type, const char* source)
+GLuint compileShader(
+    GLenum type,
+    const char* source)
 {
-    const GLuint shader = glCreateShader(type);
+    const GLuint shader =
+        glCreateShader(type);
 
     glShaderSource(
         shader,
@@ -113,8 +135,10 @@ GLuint compileShader(GLenum type, const char* source)
             infoLog
         );
 
-        std::cerr << "Error compilando shader:\n"
-                  << infoLog << '\n';
+        std::cerr
+            << "Error compilando shader:\n"
+            << infoLog
+            << '\n';
 
         glDeleteShader(shader);
 
@@ -126,20 +150,22 @@ GLuint compileShader(GLenum type, const char* source)
 
 GLuint createShaderProgram()
 {
-    const GLuint vertexShader = compileShader(
-        GL_VERTEX_SHADER,
-        vertexShaderSource
-    );
+    const GLuint vertexShader =
+        compileShader(
+            GL_VERTEX_SHADER,
+            vertexShaderSource
+        );
 
     if (vertexShader == 0)
     {
         return 0;
     }
 
-    const GLuint fragmentShader = compileShader(
-        GL_FRAGMENT_SHADER,
-        fragmentShaderSource
-    );
+    const GLuint fragmentShader =
+        compileShader(
+            GL_FRAGMENT_SHADER,
+            fragmentShaderSource
+        );
 
     if (fragmentShader == 0)
     {
@@ -148,7 +174,8 @@ GLuint createShaderProgram()
         return 0;
     }
 
-    const GLuint program = glCreateProgram();
+    const GLuint program =
+        glCreateProgram();
 
     glAttachShader(
         program,
@@ -181,8 +208,10 @@ GLuint createShaderProgram()
             infoLog
         );
 
-        std::cerr << "Error enlazando shader program:\n"
-                  << infoLog << '\n';
+        std::cerr
+            << "Error enlazando shader program:\n"
+            << infoLog
+            << '\n';
 
         glDeleteProgram(program);
 
@@ -201,15 +230,17 @@ GLuint createShaderProgram()
 int main()
 {
     // ========================================================
-    // PortAudio
+    // PORTAUDIO
     // ========================================================
 
     PaError error = Pa_Initialize();
 
     if (error != paNoError)
     {
-        std::cerr << "Error inicializando PortAudio: "
-                  << Pa_GetErrorText(error) << '\n';
+        std::cerr
+            << "Error inicializando PortAudio: "
+            << Pa_GetErrorText(error)
+            << '\n';
 
         return 1;
     }
@@ -219,7 +250,8 @@ int main()
 
     if (deviceIndex == paNoDevice)
     {
-        std::cerr << "No se encontro un dispositivo de entrada.\n";
+        std::cerr
+            << "No se encontro un dispositivo de entrada.\n";
 
         Pa_Terminate();
 
@@ -231,7 +263,8 @@ int main()
 
     if (deviceInfo == nullptr)
     {
-        std::cerr << "No se pudo obtener informacion del dispositivo.\n";
+        std::cerr
+            << "No se pudo obtener informacion del dispositivo.\n";
 
         Pa_Terminate();
 
@@ -241,12 +274,15 @@ int main()
     std::cout
         << "Dispositivo de entrada:\n"
         << "  " << deviceInfo->name << '\n'
-        << "  Canales: " << deviceInfo->maxInputChannels << '\n'
+        << "  Canales: "
+        << deviceInfo->maxInputChannels
+        << '\n'
         << "  Sample rate: "
         << deviceInfo->defaultSampleRate
         << " Hz\n\n";
 
     AudioData audioData;
+
     PaStream* stream = nullptr;
 
     error = Pa_OpenDefaultStream(
@@ -262,8 +298,10 @@ int main()
 
     if (error != paNoError)
     {
-        std::cerr << "Error abriendo el stream: "
-                  << Pa_GetErrorText(error) << '\n';
+        std::cerr
+            << "Error abriendo el stream: "
+            << Pa_GetErrorText(error)
+            << '\n';
 
         Pa_Terminate();
 
@@ -274,8 +312,10 @@ int main()
 
     if (error != paNoError)
     {
-        std::cerr << "Error iniciando el stream: "
-                  << Pa_GetErrorText(error) << '\n';
+        std::cerr
+            << "Error iniciando el stream: "
+            << Pa_GetErrorText(error)
+            << '\n';
 
         Pa_CloseStream(stream);
         Pa_Terminate();
@@ -289,7 +329,8 @@ int main()
 
     if (!glfwInit())
     {
-        std::cerr << "Error inicializando GLFW.\n";
+        std::cerr
+            << "Error inicializando GLFW.\n";
 
         Pa_StopStream(stream);
         Pa_CloseStream(stream);
@@ -313,17 +354,57 @@ int main()
         GLFW_OPENGL_CORE_PROFILE
     );
 
-    GLFWwindow* window = glfwCreateWindow(
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        "AUDIO",
-        nullptr,
-        nullptr
-    );
+    // ========================================================
+    // PANTALLA COMPLETA
+    // ========================================================
+
+    GLFWmonitor* monitor =
+        glfwGetPrimaryMonitor();
+
+    if (monitor == nullptr)
+    {
+        std::cerr
+            << "No se encontro el monitor principal.\n";
+
+        glfwTerminate();
+
+        Pa_StopStream(stream);
+        Pa_CloseStream(stream);
+        Pa_Terminate();
+
+        return 1;
+    }
+
+    const GLFWvidmode* videoMode =
+        glfwGetVideoMode(monitor);
+
+    if (videoMode == nullptr)
+    {
+        std::cerr
+            << "No se pudo obtener la resolucion del monitor.\n";
+
+        glfwTerminate();
+
+        Pa_StopStream(stream);
+        Pa_CloseStream(stream);
+        Pa_Terminate();
+
+        return 1;
+    }
+
+    GLFWwindow* window =
+        glfwCreateWindow(
+            videoMode->width,
+            videoMode->height,
+            "AUDIO",
+            monitor,
+            nullptr
+        );
 
     if (window == nullptr)
     {
-        std::cerr << "Error creando la ventana OpenGL.\n";
+        std::cerr
+            << "Error creando la ventana OpenGL.\n";
 
         glfwTerminate();
 
@@ -336,6 +417,8 @@ int main()
 
     glfwMakeContextCurrent(window);
 
+    glfwSwapInterval(1);
+
     // ========================================================
     // GLAD
     // ========================================================
@@ -344,7 +427,8 @@ int main()
         reinterpret_cast<GLADloadproc>(
             glfwGetProcAddress)))
     {
-        std::cerr << "Error cargando GLAD.\n";
+        std::cerr
+            << "Error cargando GLAD.\n";
 
         glfwDestroyWindow(window);
         glfwTerminate();
@@ -363,10 +447,15 @@ int main()
         << '\n'
         << "Renderer: "
         << glGetString(GL_RENDERER)
+        << '\n'
+        << "Resolucion: "
+        << videoMode->width
+        << " x "
+        << videoMode->height
         << "\n\n";
 
     // ========================================================
-    // Shader program
+    // SHADERS
     // ========================================================
 
     const GLuint shaderProgram =
@@ -385,7 +474,7 @@ int main()
     }
 
     // ========================================================
-    // Vertex Array Object
+    // WAVEFORM VAO / VBO
     // ========================================================
 
     GLuint VAO = 0;
@@ -410,7 +499,9 @@ int main()
 
     glBufferData(
         GL_ARRAY_BUFFER,
-        sizeof(float) * 8,
+        sizeof(float) *
+            2 *
+            WAVEFORM_SAMPLES,
         nullptr,
         GL_DYNAMIC_DRAW
     );
@@ -434,42 +525,75 @@ int main()
     glBindVertexArray(0);
 
     // ========================================================
-    // Main loop
+    // MAIN LOOP
     // ========================================================
 
     while (!glfwWindowShouldClose(window))
     {
-        const double rms =
-            audioData.rms.load();
+        // ----------------------------------------------------
+        // ESC
+        // ----------------------------------------------------
 
-        const float normalized =
-            std::clamp(
-                static_cast<float>(
-                    rms / RMS_SCALE
-                ),
-                0.0f,
-                1.0f
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE)
+            == GLFW_PRESS)
+        {
+            glfwSetWindowShouldClose(
+                window,
+                GLFW_TRUE
+            );
+        }
+
+        // ----------------------------------------------------
+        // Obtener indice actual
+        // ----------------------------------------------------
+
+        const unsigned int writeIndex =
+            audioData.writeIndex.load(
+                std::memory_order_relaxed
             );
 
         // ----------------------------------------------------
-        // Posicion de la barra
+        // Construir waveform
         // ----------------------------------------------------
 
-        const float left = -0.9f;
+        std::array<float, WAVEFORM_SAMPLES * 2>
+            vertices;
 
-        const float right =
-            left + normalized * 1.8f;
-
-        const float bottom = -0.1f;
-        const float top = 0.1f;
-
-        const float vertices[] =
+        for (int i = 0;
+             i < WAVEFORM_SAMPLES;
+             ++i)
         {
-            left,  bottom,
-            right, bottom,
-            right, top,
-            left,  top
-        };
+            const unsigned int sampleIndex =
+                (writeIndex + i)
+                % WAVEFORM_SAMPLES;
+
+            const float sample =
+                audioData.samples[sampleIndex].load(
+                    std::memory_order_relaxed
+                );
+
+            const float x =
+                -1.0f +
+                2.0f *
+                static_cast<float>(i) /
+                static_cast<float>(
+                    WAVEFORM_SAMPLES - 1
+                );
+
+            const float y =
+                std::clamp(
+                    sample * WAVEFORM_SCALE,
+                    -1.0f,
+                    1.0f
+                );
+
+            vertices[i * 2] = x;
+            vertices[i * 2 + 1] = y;
+        }
+
+        // ----------------------------------------------------
+        // Actualizar VBO
+        // ----------------------------------------------------
 
         glBindBuffer(
             GL_ARRAY_BUFFER,
@@ -480,7 +604,7 @@ int main()
             GL_ARRAY_BUFFER,
             0,
             sizeof(vertices),
-            vertices
+            vertices.data()
         );
 
         glBindBuffer(
@@ -507,14 +631,14 @@ int main()
             shaderProgram
         );
 
-        glBindVertexArray(
-            VAO
-        );
+        glBindVertexArray(VAO);
+
+        glLineWidth(2.0f);
 
         glDrawArrays(
-            GL_TRIANGLE_FAN,
+            GL_LINE_STRIP,
             0,
-            4
+            WAVEFORM_SAMPLES
         );
 
         glBindVertexArray(0);
@@ -525,7 +649,7 @@ int main()
     }
 
     // ========================================================
-    // Cleanup OpenGL
+    // CLEANUP OPENGL
     // ========================================================
 
     glDeleteVertexArrays(
@@ -543,21 +667,22 @@ int main()
     );
 
     // ========================================================
-    // Cleanup GLFW
+    // CLEANUP GLFW
     // ========================================================
 
     glfwDestroyWindow(window);
     glfwTerminate();
 
     // ========================================================
-    // Cleanup PortAudio
+    // CLEANUP PORTAUDIO
     // ========================================================
 
     Pa_StopStream(stream);
     Pa_CloseStream(stream);
     Pa_Terminate();
 
-    std::cout << "AUDIO finalizado.\n";
+    std::cout
+        << "AUDIO finalizado.\n";
 
     return 0;
 }
