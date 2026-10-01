@@ -12,9 +12,11 @@
 #include "InputMouse.h"
 #include "Renderer.h"
 #include "Shader.h"
+#include "Spectrogram3DRenderer.h"
 #include "TextRenderer.h"
 #include "WaveForm.h"
 #include "Window.h"
+
 
 // ============================================================
 // CONFIGURACIÓN
@@ -50,6 +52,17 @@ constexpr float DIAGNOSTIC_BAND_LIMITS[
     15000.0f,
     20000.0f,
     22050.0f
+};
+
+
+// ============================================================
+// VISUALIZACIÓN 2D SUPERIOR
+// ============================================================
+
+enum class TopVisualization
+{
+    Waveform,
+    Spectrogram
 };
 
 
@@ -110,6 +123,7 @@ int main()
     if (!textRenderer.initialize())
     {
         window.close();
+
         audioController.stop();
 
         return 1;
@@ -117,7 +131,7 @@ int main()
 
 
     // ========================================================
-    // SHADER DEL ESPECTROGRAMA
+    // SHADER DEL ESPECTROGRAMA 2D
     // ========================================================
 
     const GLuint spectrumShaderProgram =
@@ -129,11 +143,14 @@ int main()
     if (spectrumShaderProgram == 0)
     {
         textRenderer.cleanup();
+
         window.close();
+
         audioController.stop();
 
         return 1;
     }
+
 
     const GLint spectrumLocation =
         glGetUniformLocation(
@@ -146,6 +163,32 @@ int main()
             spectrumShaderProgram,
             "uColumn"
         );
+
+
+    // ========================================================
+    // SHADER DEL ESPECTROGRAMA 3D
+    // ========================================================
+
+    const GLuint spectrogram3DShaderProgram =
+        Shader::createProgramFromFiles(
+            "../src/shaders/spectrogram3d.vert",
+            "../src/shaders/spectrogram3d.frag"
+        );
+
+    if (spectrogram3DShaderProgram == 0)
+    {
+        glDeleteProgram(
+            spectrumShaderProgram
+        );
+
+        textRenderer.cleanup();
+
+        window.close();
+
+        audioController.stop();
+
+        return 1;
+    }
 
 
     // ========================================================
@@ -240,6 +283,66 @@ int main()
 
 
     // ========================================================
+    // RENDERER DEL ESPECTROGRAMA 3D
+    // ========================================================
+
+    Spectrogram3DRenderer spectrogram3DRenderer;
+
+    if (
+        !spectrogram3DRenderer.initialize(
+            SPECTROGRAM_WIDTH,
+            SPECTROGRAM_HEIGHT
+        )
+    )
+    {
+        textRenderer.cleanup();
+
+        glDeleteVertexArrays(
+            1,
+            &waveformVAO
+        );
+
+        glDeleteBuffers(
+            1,
+            &waveformVBO
+        );
+
+        glDeleteVertexArrays(
+            1,
+            &spectrogramVAO
+        );
+
+        glDeleteBuffers(
+            1,
+            &spectrogramVBO
+        );
+
+        glDeleteTextures(
+            1,
+            &spectrogramTexture
+        );
+
+        glDeleteProgram(
+            lineRenderer.shader
+        );
+
+        glDeleteProgram(
+            spectrumShaderProgram
+        );
+
+        glDeleteProgram(
+            spectrogram3DShaderProgram
+        );
+
+        window.close();
+
+        audioController.stop();
+
+        return 1;
+    }
+
+
+    // ========================================================
     // FFT
     // ========================================================
 
@@ -257,6 +360,7 @@ int main()
         std::complex<float>,
         FFT_SIZE
     > fftValues{};
+
 
     for (int i = 0;
          i < FFT_SIZE;
@@ -285,6 +389,9 @@ int main()
     float visualGain = 1.0f;
 
     int spectrogramColumn = 0;
+
+    TopVisualization topVisualization =
+        TopVisualization::Waveform;
 
 
     // ========================================================
@@ -321,15 +428,68 @@ int main()
     {
         window.pollEvents();
 
+
+        // ====================================================
+        // TECLADO
+        // ====================================================
+
         keyboard.process(
             window.getHandle()
         );
+
+
+        // ====================================================
+        // CAMBIO DE VISUALIZACIÓN 2D
+        // ====================================================
+
+        if (keyboard.isLeftPressed())
+        {
+            if (
+                topVisualization ==
+                TopVisualization::Waveform
+            )
+            {
+                topVisualization =
+                    TopVisualization::Spectrogram;
+            }
+            else
+            {
+                topVisualization =
+                    TopVisualization::Waveform;
+            }
+        }
+
+
+        if (keyboard.isRightPressed())
+        {
+            if (
+                topVisualization ==
+                TopVisualization::Waveform
+            )
+            {
+                topVisualization =
+                    TopVisualization::Spectrogram;
+            }
+            else
+            {
+                topVisualization =
+                    TopVisualization::Waveform;
+            }
+        }
+
+
+        // ====================================================
+        // MOUSE
+        // ====================================================
 
         mouse.process(
             window.getHandle()
         );
 
         (void)camera;
+
+        (void)keyboard.isAPressed();
+        (void)keyboard.isDPressed();
 
 
         // ====================================================
@@ -353,14 +513,6 @@ int main()
         // DISTRIBUCIÓN DE PANELES
         // ====================================================
 
-        Rectangle waveformPanel{};
-
-        Rectangle waveformPlot{};
-
-        Rectangle spectrogramPanel{};
-
-        Rectangle spectrogramPlot{};
-
         const float margin =
             std::max(
                 18.0f,
@@ -373,37 +525,43 @@ int main()
                 screenHeight * 0.018f
             );
 
+
         const float availableHeight =
             screenHeight -
             2.0f * margin -
             gap;
 
-        const float waveformHeight =
+
+        const float topPanelHeight =
             availableHeight * 0.43f;
 
-        const float spectrogramHeight =
-            availableHeight -
-            waveformHeight;
 
-        waveformPanel =
+        const float bottomPanelHeight =
+            availableHeight -
+            topPanelHeight;
+
+
+        Rectangle topPanel =
         {
             margin,
             margin,
             screenWidth -
                 2.0f * margin,
-            waveformHeight
+            topPanelHeight
         };
 
-        spectrogramPanel =
+
+        Rectangle bottomPanel =
         {
             margin,
             margin +
-                waveformHeight +
+                topPanelHeight +
                 gap,
             screenWidth -
                 2.0f * margin,
-            spectrogramHeight
+            bottomPanelHeight
         };
+
 
         const float leftAxis = 72.0f;
 
@@ -413,37 +571,20 @@ int main()
 
         const float bottomMargin = 52.0f;
 
-        waveformPlot =
+
+        Rectangle topPlot =
         {
-            waveformPanel.x +
+            topPanel.x +
                 leftAxis,
 
-            waveformPanel.y +
+            topPanel.y +
                 topMargin,
 
-            waveformPanel.width -
+            topPanel.width -
                 leftAxis -
                 rightMargin,
 
-            waveformPanel.height -
-                topMargin -
-                bottomMargin
-        };
-
-        spectrogramPlot =
-        {
-            spectrogramPanel.x +
-                leftAxis,
-
-            spectrogramPanel.y +
-                topMargin,
-
-            spectrogramPanel.width -
-                leftAxis -
-                rightMargin -
-                54.0f,
-
-            spectrogramPanel.height -
+            topPanel.height -
                 topMargin -
                 bottomMargin
         };
@@ -456,10 +597,12 @@ int main()
         const AudioData& audioData =
             audioController.getAudioData();
 
+
         const int currentWriteIndex =
             audioData.writeIndex.load(
                 std::memory_order_relaxed
             );
+
 
         for (int i = 0;
              i < FFT_SIZE;
@@ -477,6 +620,7 @@ int main()
                 ) %
                 WAVEFORM_SAMPLES;
 
+
             samples[i] =
                 audioData.samples[index].load(
                     std::memory_order_relaxed
@@ -490,6 +634,7 @@ int main()
 
         float peak = 0.0f;
 
+
         for (const float sample : samples)
         {
             peak =
@@ -499,13 +644,16 @@ int main()
                 );
         }
 
+
         float targetGain = MIN_GAIN;
+
 
         if (peak > 1.0e-6f)
         {
             targetGain =
                 TARGET_AMPLITUDE /
                 peak;
+
 
             targetGain =
                 std::clamp(
@@ -514,6 +662,7 @@ int main()
                     MAX_GAIN
                 );
         }
+
 
         if (targetGain > visualGain)
         {
@@ -551,6 +700,7 @@ int main()
                 );
         }
 
+
         fft(
             fftValues
         );
@@ -569,10 +719,12 @@ int main()
                 static_cast<float>(SAMPLE_RATE) /
                 static_cast<float>(FFT_SIZE);
 
+
             const float magnitude =
                 std::abs(
                     fftValues[bin]
                 );
+
 
             const double power =
                 static_cast<double>(
@@ -581,6 +733,7 @@ int main()
                 static_cast<double>(
                     magnitude
                 );
+
 
             for (int band = 0;
                  band < DIAGNOSTIC_BANDS;
@@ -601,17 +754,26 @@ int main()
             }
         }
 
+
         diagnosticTime +=
-            static_cast<float>(FRAMES_PER_BUFFER) /
-            static_cast<float>(SAMPLE_RATE);
+            static_cast<float>(
+                FRAMES_PER_BUFFER
+            ) /
+            static_cast<float>(
+                SAMPLE_RATE
+            );
 
 
-        if (diagnosticTime >= DIAGNOSTIC_INTERVAL)
+        if (
+            diagnosticTime >=
+            DIAGNOSTIC_INTERVAL
+        )
         {
             std::cout
                 << "\n========================================\n"
                 << "ENERGÍA DEL AUDIO POR BANDA\n"
                 << "========================================\n";
+
 
             constexpr const char* bandNames[
                 DIAGNOSTIC_BANDS
@@ -625,7 +787,9 @@ int main()
                 "20 - 22.05 kHz"
             };
 
+
             double totalEnergy = 0.0;
+
 
             for (int band = 0;
                  band < DIAGNOSTIC_BANDS;
@@ -635,11 +799,13 @@ int main()
                     diagnosticEnergy[band];
             }
 
+
             for (int band = 0;
                  band < DIAGNOSTIC_BANDS;
                  ++band)
             {
                 double percentage = 0.0;
+
 
                 if (totalEnergy > 0.0)
                 {
@@ -649,6 +815,7 @@ int main()
                         totalEnergy;
                 }
 
+
                 std::cout
                     << bandNames[band]
                     << ": "
@@ -656,10 +823,15 @@ int main()
                     << " %\n";
             }
 
+
             std::cout
                 << "========================================\n";
 
-            diagnosticEnergy.fill(0.0);
+
+            diagnosticEnergy.fill(
+                0.0
+            );
+
 
             diagnosticTime = 0.0f;
         }
@@ -678,15 +850,18 @@ int main()
                     fftValues[bin]
                 );
 
+
             const float normalizedMagnitude =
                 magnitude /
                 static_cast<float>(
                     FFT_SIZE
                 );
 
+
             const float enhancedMagnitude =
                 normalizedMagnitude *
                 SPECTROGRAM_VISUAL_GAIN;
+
 
             const float safeMagnitude =
                 std::max(
@@ -694,11 +869,13 @@ int main()
                     1.0e-7f
                 );
 
+
             float decibels =
                 20.0f *
                 std::log10(
                     safeMagnitude
                 );
+
 
             decibels =
                 std::clamp(
@@ -706,6 +883,7 @@ int main()
                     SPECTROGRAM_MIN_DB,
                     SPECTROGRAM_MAX_DB
                 );
+
 
             float normalized =
                 (
@@ -717,12 +895,14 @@ int main()
                     SPECTROGRAM_MIN_DB
                 );
 
+
             normalized =
                 std::clamp(
                     normalized,
                     0.0f,
                     1.0f
                 );
+
 
             spectrogramData[
                 bin *
@@ -734,6 +914,15 @@ int main()
                     255.0f
                 );
         }
+
+
+        // ====================================================
+        // COLUMNA ACTUAL DEL ESPECTROGRAMA
+        // ====================================================
+
+        const int currentSpectrogramColumn =
+            spectrogramColumn;
+
 
         spectrogramColumn =
             (
@@ -752,6 +941,7 @@ int main()
             spectrogramTexture
         );
 
+
         glTexSubImage2D(
             GL_TEXTURE_2D,
             0,
@@ -766,12 +956,24 @@ int main()
 
 
         // ====================================================
-        // ACTUALIZAR QUAD
+        // ACTUALIZAR 3D
+        // ====================================================
+
+        spectrogram3DRenderer.update(
+            spectrogramData.data(),
+            SPECTROGRAM_WIDTH,
+            SPECTROGRAM_HEIGHT,
+            currentSpectrogramColumn
+        );
+
+
+        // ====================================================
+        // ACTUALIZAR QUAD 2D
         // ====================================================
 
         updateSpectrogramQuad(
             spectrogramVBO,
-            spectrogramPlot,
+            topPlot,
             screenWidth,
             screenHeight
         );
@@ -788,113 +990,140 @@ int main()
             1.0f
         );
 
+
         glClear(
-            GL_COLOR_BUFFER_BIT
+            GL_COLOR_BUFFER_BIT |
+            GL_DEPTH_BUFFER_BIT
         );
 
 
         // ====================================================
-        // DIBUJAR ESPECTROGRAMA
+        // PANEL SUPERIOR — 2D
         // ====================================================
 
-        drawSpectrogram(
-            spectrumShaderProgram,
-            spectrogramVAO,
-            spectrogramTexture,
-            spectrumLocation,
-            columnLocation,
-            spectrogramColumn
+        if (
+            topVisualization ==
+            TopVisualization::Spectrogram
+        )
+        {
+            drawSpectrogram(
+                spectrumShaderProgram,
+                spectrogramVAO,
+                spectrogramTexture,
+                spectrumLocation,
+                columnLocation,
+                spectrogramColumn
+            );
+        }
+        else
+        {
+            glUseProgram(
+                lineRenderer.shader
+            );
+
+
+            drawWaveform(
+                waveformVAO,
+                waveformVBO,
+                samples,
+                visualGain,
+                topPlot,
+                screenWidth,
+                screenHeight
+            );
+        }
+
+
+        // ====================================================
+        // PANEL INFERIOR — 3D
+        // ====================================================
+
+        glEnable(
+            GL_DEPTH_TEST
         );
 
 
-        // ====================================================
-        // DIBUJAR FORMA DE ONDA
-        // ====================================================
-
-        glUseProgram(
-            lineRenderer.shader
+        glViewport(
+            static_cast<GLint>(
+                bottomPanel.x
+            ),
+            static_cast<GLint>(
+                screenHeight -
+                bottomPanel.y -
+                bottomPanel.height
+            ),
+            static_cast<GLsizei>(
+                bottomPanel.width
+            ),
+            static_cast<GLsizei>(
+                bottomPanel.height
+            )
         );
 
-        drawWaveform(
-            waveformVAO,
-            waveformVBO,
-            samples,
-            visualGain,
-            waveformPlot,
-            screenWidth,
-            screenHeight
+
+        spectrogram3DRenderer.render(
+            spectrogram3DShaderProgram
         );
 
 
+        glDisable(
+            GL_DEPTH_TEST
+        );
+
+
+        window.updateViewport();
+
+
         // ====================================================
-        // INTERFAZ
+        // INTERFAZ 2D
         // ====================================================
 
         lineRenderer.vertices.clear();
 
+
         addRectangle(
             lineRenderer,
-            waveformPanel,
+            topPanel,
             screenWidth,
             screenHeight
         );
 
+
         addRectangle(
             lineRenderer,
-            spectrogramPanel,
+            bottomPanel,
             screenWidth,
             screenHeight
         );
 
+
         addRectangle(
             lineRenderer,
-            waveformPlot,
+            topPlot,
             screenWidth,
             screenHeight
         );
 
-        addRectangle(
-            lineRenderer,
-            spectrogramPlot,
-            screenWidth,
-            screenHeight
-        );
 
         addPlotGrid(
             lineRenderer,
-            waveformPlot,
+            topPlot,
             4,
             10,
             screenWidth,
             screenHeight
         );
 
-        addPlotGrid(
-            lineRenderer,
-            spectrogramPlot,
-            5,
-            10,
-            screenWidth,
-            screenHeight
-        );
 
         addAxisTicks(
             lineRenderer,
-            waveformPlot,
+            topPlot,
             4,
             10,
             screenWidth,
             screenHeight
         );
 
-        addAxisTicks(
-            lineRenderer,
-            spectrogramPlot,
-            5,
-            10,
-            screenWidth,
-            screenHeight
-        );
 
         drawLines(
             lineRenderer
@@ -902,7 +1131,7 @@ int main()
 
 
         // ====================================================
-        // ETIQUETAS — FORMA DE ONDA
+        // TEXTO
         // ====================================================
 
         const float textScale =
@@ -912,10 +1141,320 @@ int main()
                 1.5f
             );
 
+
+        // ====================================================
+        // WAVEFORM
+        // ====================================================
+
+        if (
+            topVisualization ==
+            TopVisualization::Waveform
+        )
+        {
+            textRenderer.render(
+                "FORMA DE ONDA",
+                topPanel.x + 30.0f,
+                topPanel.y + 10.0f,
+                textScale * 1.35f,
+                screenWidth,
+                screenHeight,
+                0.92f,
+                0.95f,
+                0.98f
+            );
+
+
+            textRenderer.render(
+                "Amplitud",
+                topPanel.x + 14.0f,
+                topPlot.y +
+                    topPlot.height * 0.5f -
+                    10.0f,
+                textScale,
+                screenWidth,
+                screenHeight
+            );
+
+
+            textRenderer.render(
+                "Tiempo (ms)",
+                topPlot.x +
+                    topPlot.width * 0.5f -
+                    40.0f,
+                topPlot.y +
+                    topPlot.height +
+                    28.0f,
+                textScale,
+                screenWidth,
+                screenHeight
+            );
+
+
+            constexpr int WAVEFORM_Y_DIVISIONS = 4;
+
+
+            for (int i = 0;
+                 i <= WAVEFORM_Y_DIVISIONS;
+                 ++i)
+            {
+                const float value =
+                    -1.0f +
+                    2.0f *
+                    static_cast<float>(i) /
+                    static_cast<float>(
+                        WAVEFORM_Y_DIVISIONS
+                    );
+
+
+                const float y =
+                    topPlot.y +
+                    topPlot.height -
+                    topPlot.height *
+                    static_cast<float>(i) /
+                    static_cast<float>(
+                        WAVEFORM_Y_DIVISIONS
+                    );
+
+
+                char label[32];
+
+
+                std::snprintf(
+                    label,
+                    sizeof(label),
+                    "%.1f",
+                    value
+                );
+
+
+                textRenderer.render(
+                    label,
+                    topPlot.x - 38.0f,
+                    y - 9.0f,
+                    textScale * 0.9f,
+                    screenWidth,
+                    screenHeight
+                );
+            }
+
+
+            constexpr int WAVEFORM_X_DIVISIONS = 10;
+
+
+            for (int i = 0;
+                 i <= WAVEFORM_X_DIVISIONS;
+                 ++i)
+            {
+                const float fraction =
+                    static_cast<float>(i) /
+                    static_cast<float>(
+                        WAVEFORM_X_DIVISIONS
+                    );
+
+
+                const float x =
+                    topPlot.x +
+                    topPlot.width *
+                    fraction;
+
+
+                const float milliseconds =
+                    fraction *
+                    WAVEFORM_DURATION *
+                    1000.0f;
+
+
+                char label[32];
+
+
+                std::snprintf(
+                    label,
+                    sizeof(label),
+                    "%.1f",
+                    milliseconds
+                );
+
+
+                textRenderer.render(
+                    label,
+                    x - 12.0f,
+                    topPlot.y +
+                        topPlot.height +
+                        5.0f,
+                    textScale * 0.85f,
+                    screenWidth,
+                    screenHeight
+                );
+            }
+        }
+
+
+        // ====================================================
+        // ESPECTROGRAMA 2D
+        // ====================================================
+
+        else
+        {
+            textRenderer.render(
+                "ESPECTROGRAMA",
+                topPanel.x +
+                    topPanel.width * 0.5f -
+                    65.0f,
+                topPanel.y + 10.0f,
+                textScale * 1.35f,
+                screenWidth,
+                screenHeight,
+                0.92f,
+                0.95f,
+                0.98f
+            );
+
+
+            textRenderer.render(
+                "Frecuencia (Hz)",
+                topPanel.x + 12.0f,
+                topPanel.y + 2.0f,
+                textScale,
+                screenWidth,
+                screenHeight
+            );
+
+
+            textRenderer.render(
+                "Tiempo (s)",
+                topPlot.x +
+                    topPlot.width * 0.5f -
+                    30.0f,
+                topPlot.y +
+                    topPlot.height +
+                    28.0f,
+                textScale,
+                screenWidth,
+                screenHeight
+            );
+
+
+            constexpr int SPECTROGRAM_Y_DIVISIONS = 5;
+
+
+            for (int i = 0;
+                 i <= SPECTROGRAM_Y_DIVISIONS;
+                 ++i)
+            {
+                const float fraction =
+                    static_cast<float>(i) /
+                    static_cast<float>(
+                        SPECTROGRAM_Y_DIVISIONS
+                    );
+
+
+                const float frequency =
+                    fraction *
+                    SAMPLE_RATE *
+                    0.5f;
+
+
+                const float y =
+                    topPlot.y +
+                    topPlot.height -
+                    topPlot.height *
+                    fraction;
+
+
+                char label[32];
+
+
+                if (frequency >= 1000.0f)
+                {
+                    std::snprintf(
+                        label,
+                        sizeof(label),
+                        "%.1f k",
+                        frequency / 1000.0f
+                    );
+                }
+                else
+                {
+                    std::snprintf(
+                        label,
+                        sizeof(label),
+                        "%.0f",
+                        frequency
+                    );
+                }
+
+
+                textRenderer.render(
+                    label,
+                    topPlot.x - 47.0f,
+                    y - 9.0f,
+                    textScale * 0.9f,
+                    screenWidth,
+                    screenHeight
+                );
+            }
+
+
+            constexpr int SPECTROGRAM_X_DIVISIONS = 10;
+
+
+            for (int i = 0;
+                 i <= SPECTROGRAM_X_DIVISIONS;
+                 ++i)
+            {
+                const float fraction =
+                    static_cast<float>(i) /
+                    static_cast<float>(
+                        SPECTROGRAM_X_DIVISIONS
+                    );
+
+
+                const float x =
+                    topPlot.x +
+                    topPlot.width *
+                    fraction;
+
+
+                const float seconds =
+                    fraction *
+                    SPECTROGRAM_DURATION;
+
+
+                char label[32];
+
+
+                std::snprintf(
+                    label,
+                    sizeof(label),
+                    "%.1f",
+                    seconds
+                );
+
+
+                textRenderer.render(
+                    label,
+                    x - 10.0f,
+                    topPlot.y +
+                        topPlot.height +
+                        5.0f,
+                    textScale * 0.85f,
+                    screenWidth,
+                    screenHeight
+                );
+            }
+        }
+
+
+        // ====================================================
+        // TÍTULO 3D
+        // ====================================================
+
         textRenderer.render(
-            "FORMA DE ONDA",
-            waveformPanel.x + 30.0f,
-            waveformPanel.y + 10.0f,
+            "ESPECTROGRAMA 3D",
+            bottomPanel.x +
+                bottomPanel.width * 0.5f -
+                80.0f,
+            bottomPanel.y + 10.0f,
             textScale * 1.35f,
             screenWidth,
             screenHeight,
@@ -923,252 +1462,6 @@ int main()
             0.95f,
             0.98f
         );
-
-        textRenderer.render(
-            "Amplitud",
-            waveformPanel.x + 14.0f,
-            waveformPlot.y +
-                waveformPlot.height * 0.5f -
-                10.0f,
-            textScale,
-            screenWidth,
-            screenHeight
-        );
-
-        textRenderer.render(
-            "Tiempo (ms)",
-            waveformPlot.x +
-                waveformPlot.width * 0.5f -
-                40.0f,
-            waveformPlot.y +
-                waveformPlot.height +
-                28.0f,
-            textScale,
-            screenWidth,
-            screenHeight
-        );
-
-        constexpr int WAVEFORM_Y_DIVISIONS = 4;
-
-        for (int i = 0;
-             i <= WAVEFORM_Y_DIVISIONS;
-             ++i)
-        {
-            const float value =
-                -1.0f +
-                2.0f *
-                static_cast<float>(i) /
-                static_cast<float>(
-                    WAVEFORM_Y_DIVISIONS
-                );
-
-            const float y =
-                waveformPlot.y +
-                waveformPlot.height -
-                waveformPlot.height *
-                static_cast<float>(i) /
-                static_cast<float>(
-                    WAVEFORM_Y_DIVISIONS
-                );
-
-            char label[32];
-
-            std::snprintf(
-                label,
-                sizeof(label),
-                "%.1f",
-                value
-            );
-
-            textRenderer.render(
-                label,
-                waveformPlot.x - 38.0f,
-                y - 9.0f,
-                textScale * 0.9f,
-                screenWidth,
-                screenHeight
-            );
-        }
-
-        constexpr int WAVEFORM_X_DIVISIONS = 10;
-
-        for (int i = 0;
-             i <= WAVEFORM_X_DIVISIONS;
-             ++i)
-        {
-            const float fraction =
-                static_cast<float>(i) /
-                static_cast<float>(
-                    WAVEFORM_X_DIVISIONS
-                );
-
-            const float x =
-                waveformPlot.x +
-                waveformPlot.width *
-                fraction;
-
-            const float milliseconds =
-                fraction *
-                WAVEFORM_DURATION *
-                1000.0f;
-
-            char label[32];
-
-            std::snprintf(
-                label,
-                sizeof(label),
-                "%.1f",
-                milliseconds
-            );
-
-            textRenderer.render(
-                label,
-                x - 12.0f,
-                waveformPlot.y +
-                    waveformPlot.height +
-                    5.0f,
-                textScale * 0.85f,
-                screenWidth,
-                screenHeight
-            );
-        }
-
-
-        // ====================================================
-        // ETIQUETAS — ESPECTROGRAMA
-        // ====================================================
-
-        textRenderer.render(
-            "ESPECTROGRAMA",
-            spectrogramPanel.x +
-                spectrogramPanel.width * 0.5f -
-                65.0f,
-            spectrogramPanel.y + 10.0f,
-            textScale * 1.35f,
-            screenWidth,
-            screenHeight,
-            0.92f,
-            0.95f,
-            0.98f
-        );
-
-        textRenderer.render(
-            "Frecuencia (Hz)",
-            spectrogramPanel.x + 12.0f,
-            spectrogramPanel.y + 2.0f,
-            textScale,
-            screenWidth,
-            screenHeight
-        );
-
-        textRenderer.render(
-            "Tiempo (s)",
-            spectrogramPlot.x +
-                spectrogramPlot.width * 0.5f -
-                30.0f,
-            spectrogramPlot.y +
-                spectrogramPlot.height +
-                28.0f,
-            textScale,
-            screenWidth,
-            screenHeight
-        );
-
-        constexpr int SPECTROGRAM_Y_DIVISIONS = 5;
-
-        for (int i = 0;
-             i <= SPECTROGRAM_Y_DIVISIONS;
-             ++i)
-        {
-            const float fraction =
-                static_cast<float>(i) /
-                static_cast<float>(
-                    SPECTROGRAM_Y_DIVISIONS
-                );
-
-            const float frequency =
-                fraction *
-                SAMPLE_RATE *
-                0.5f;
-
-            const float y =
-                spectrogramPlot.y +
-                spectrogramPlot.height -
-                spectrogramPlot.height *
-                fraction;
-
-            char label[32];
-
-            if (frequency >= 1000.0f)
-            {
-                std::snprintf(
-                    label,
-                    sizeof(label),
-                    "%.1f k",
-                    frequency / 1000.0f
-                );
-            }
-            else
-            {
-                std::snprintf(
-                    label,
-                    sizeof(label),
-                    "%.0f",
-                    frequency
-                );
-            }
-
-            textRenderer.render(
-                label,
-                spectrogramPlot.x - 47.0f,
-                y - 9.0f,
-                textScale * 0.9f,
-                screenWidth,
-                screenHeight
-            );
-        }
-
-        constexpr int SPECTROGRAM_X_DIVISIONS = 10;
-
-        for (int i = 0;
-             i <= SPECTROGRAM_X_DIVISIONS;
-             ++i)
-        {
-            const float fraction =
-                static_cast<float>(i) /
-                static_cast<float>(
-                    SPECTROGRAM_X_DIVISIONS
-                );
-
-            const float x =
-                spectrogramPlot.x +
-                spectrogramPlot.width *
-                fraction;
-
-            const float seconds =
-                fraction *
-                SPECTROGRAM_DURATION;
-
-            char label[32];
-
-            std::snprintf(
-                label,
-                sizeof(label),
-                "%.1f",
-                seconds
-            );
-
-            textRenderer.render(
-                label,
-                x - 10.0f,
-                spectrogramPlot.y +
-                    spectrogramPlot.height +
-                    5.0f,
-                textScale * 0.85f,
-                screenWidth,
-                screenHeight
-            );
-        }
 
 
         // ====================================================
@@ -1183,54 +1476,62 @@ int main()
     // LIMPIEZA
     // ========================================================
 
+    spectrogram3DRenderer.destroy();
+
+
     textRenderer.cleanup();
+
 
     glDeleteVertexArrays(
         1,
         &waveformVAO
     );
 
+
     glDeleteBuffers(
         1,
         &waveformVBO
     );
+
 
     glDeleteVertexArrays(
         1,
         &spectrogramVAO
     );
 
+
     glDeleteBuffers(
         1,
         &spectrogramVBO
     );
 
-    glDeleteVertexArrays(
-        1,
-        &lineRenderer.vao
-    );
-
-    glDeleteBuffers(
-        1,
-        &lineRenderer.vbo
-    );
 
     glDeleteTextures(
         1,
         &spectrogramTexture
     );
 
+
     glDeleteProgram(
         lineRenderer.shader
     );
+
 
     glDeleteProgram(
         spectrumShaderProgram
     );
 
+
+    glDeleteProgram(
+        spectrogram3DShaderProgram
+    );
+
+
     window.close();
 
+
     audioController.stop();
+
 
     return 0;
 }
