@@ -44,11 +44,20 @@ add_subdirectory(
 )
 
 # ============================================================
+# Fuentes de AUDIO
+# ============================================================
+
+file(GLOB_RECURSE AUDIO_SOURCES
+    CONFIGURE_DEPENDS
+    src/*
+)
+
+# ============================================================
 # AUDIO
 # ============================================================
 
 add_executable(AUDIO
-    src/main.cpp
+    ${AUDIO_SOURCES}
     externals/glad/src/glad.c
 )
 
