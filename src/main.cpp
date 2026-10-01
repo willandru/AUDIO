@@ -897,7 +897,9 @@ int main()
 
         textRenderer.render(
             "ESPECTROGRAMA",
-            spectrogramPanel.x + 30.0f,
+            spectrogramPanel.x +
+                spectrogramPanel.width * 0.5f -
+                65.0f,
             spectrogramPanel.y + 10.0f,
             textScale * 1.35f,
             screenWidth,
@@ -910,9 +912,7 @@ int main()
         textRenderer.render(
             "Frecuencia (Hz)",
             spectrogramPanel.x + 12.0f,
-            spectrogramPlot.y +
-                spectrogramPlot.height * 0.5f -
-                10.0f,
+            spectrogramPanel.y + 2.0f,
             textScale,
             screenWidth,
             screenHeight
