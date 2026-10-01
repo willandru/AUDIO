@@ -32,6 +32,28 @@ constexpr float MAX_GAIN = 50.0f;
 
 
 // ============================================================
+// DIAGNÓSTICO DE FRECUENCIAS
+// ============================================================
+
+constexpr float DIAGNOSTIC_INTERVAL = 1.0f;
+
+constexpr int DIAGNOSTIC_BANDS = 6;
+
+constexpr float DIAGNOSTIC_BAND_LIMITS[
+    DIAGNOSTIC_BANDS + 1
+] =
+{
+    0.0f,
+    1000.0f,
+    5000.0f,
+    10000.0f,
+    15000.0f,
+    20000.0f,
+    22050.0f
+};
+
+
+// ============================================================
 // MAIN
 // ============================================================
 
@@ -263,6 +285,18 @@ int main()
     float visualGain = 1.0f;
 
     int spectrogramColumn = 0;
+
+
+    // ========================================================
+    // ESTADO DEL DIAGNÓSTICO
+    // ========================================================
+
+    float diagnosticTime = 0.0f;
+
+    std::array<
+        double,
+        DIAGNOSTIC_BANDS
+    > diagnosticEnergy{};
 
 
     // ========================================================
@@ -520,6 +554,115 @@ int main()
         fft(
             fftValues
         );
+
+
+        // ====================================================
+        // DIAGNÓSTICO DE BANDAS
+        // ====================================================
+
+        for (int bin = 0;
+             bin < SPECTRUM_BINS;
+             ++bin)
+        {
+            const float frequency =
+                static_cast<float>(bin) *
+                static_cast<float>(SAMPLE_RATE) /
+                static_cast<float>(FFT_SIZE);
+
+            const float magnitude =
+                std::abs(
+                    fftValues[bin]
+                );
+
+            const double power =
+                static_cast<double>(
+                    magnitude
+                ) *
+                static_cast<double>(
+                    magnitude
+                );
+
+            for (int band = 0;
+                 band < DIAGNOSTIC_BANDS;
+                 ++band)
+            {
+                if (
+                    frequency >=
+                        DIAGNOSTIC_BAND_LIMITS[band] &&
+                    frequency <
+                        DIAGNOSTIC_BAND_LIMITS[band + 1]
+                )
+                {
+                    diagnosticEnergy[band] +=
+                        power;
+
+                    break;
+                }
+            }
+        }
+
+        diagnosticTime +=
+            static_cast<float>(FRAMES_PER_BUFFER) /
+            static_cast<float>(SAMPLE_RATE);
+
+
+        if (diagnosticTime >= DIAGNOSTIC_INTERVAL)
+        {
+            std::cout
+                << "\n========================================\n"
+                << "ENERGÍA DEL AUDIO POR BANDA\n"
+                << "========================================\n";
+
+            constexpr const char* bandNames[
+                DIAGNOSTIC_BANDS
+            ] =
+            {
+                "0 - 1 kHz",
+                "1 - 5 kHz",
+                "5 - 10 kHz",
+                "10 - 15 kHz",
+                "15 - 20 kHz",
+                "20 - 22.05 kHz"
+            };
+
+            double totalEnergy = 0.0;
+
+            for (int band = 0;
+                 band < DIAGNOSTIC_BANDS;
+                 ++band)
+            {
+                totalEnergy +=
+                    diagnosticEnergy[band];
+            }
+
+            for (int band = 0;
+                 band < DIAGNOSTIC_BANDS;
+                 ++band)
+            {
+                double percentage = 0.0;
+
+                if (totalEnergy > 0.0)
+                {
+                    percentage =
+                        100.0 *
+                        diagnosticEnergy[band] /
+                        totalEnergy;
+                }
+
+                std::cout
+                    << bandNames[band]
+                    << ": "
+                    << percentage
+                    << " %\n";
+            }
+
+            std::cout
+                << "========================================\n";
+
+            diagnosticEnergy.fill(0.0);
+
+            diagnosticTime = 0.0f;
+        }
 
 
         // ====================================================

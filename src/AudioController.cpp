@@ -1,6 +1,11 @@
 #include "AudioController.h"
 
+#include <cmath>
 #include <iostream>
+#include <limits>
+
+#include <pa_win_wasapi.h>
+
 
 // ============================================================
 // CONSTRUCTOR
@@ -66,13 +71,64 @@ bool AudioController::start()
         return true;
     }
 
-    const PaDeviceIndex inputDevice =
-        Pa_GetDefaultInputDevice();
+    PaHostApiIndex wasapiHostApi =
+        Pa_HostApiTypeIdToHostApiIndex(paWASAPI);
+
+    if (wasapiHostApi == paHostApiNotFound)
+    {
+        std::cerr
+            << "WASAPI no está disponible en PortAudio.\n";
+
+        return false;
+    }
+
+    const PaHostApiInfo* hostApiInfo =
+        Pa_GetHostApiInfo(wasapiHostApi);
+
+    if (hostApiInfo == nullptr)
+    {
+        std::cerr
+            << "No se pudo obtener información de WASAPI.\n";
+
+        return false;
+    }
+
+    PaDeviceIndex inputDevice = paNoDevice;
+
+    for (int i = 0;
+         i < hostApiInfo->deviceCount;
+         ++i)
+    {
+        const PaDeviceIndex device =
+            Pa_HostApiDeviceIndexToDeviceIndex(
+                wasapiHostApi,
+                i
+            );
+
+        if (device == paNoDevice)
+        {
+            continue;
+        }
+
+        const PaDeviceInfo* deviceInfo =
+            Pa_GetDeviceInfo(device);
+
+        if (deviceInfo == nullptr)
+        {
+            continue;
+        }
+
+        if (deviceInfo->maxInputChannels > 0)
+        {
+            inputDevice = device;
+            break;
+        }
+    }
 
     if (inputDevice == paNoDevice)
     {
         std::cerr
-            << "No se encontró dispositivo de entrada.\n";
+            << "No se encontró dispositivo de entrada WASAPI.\n";
 
         return false;
     }
@@ -89,6 +145,9 @@ bool AudioController::start()
     }
 
     std::cout
+        << "Host API: "
+        << hostApiInfo->name
+        << '\n'
         << "Dispositivo de entrada: "
         << deviceInfo->name
         << '\n'
@@ -101,22 +160,45 @@ bool AudioController::start()
 
 
     // ========================================================
+    // CONFIGURACIÓN WASAPI
+    // ========================================================
+
+    PaWasapiStreamInfo wasapiStreamInfo{};
+
+    wasapiStreamInfo.size =
+        sizeof(PaWasapiStreamInfo);
+
+    wasapiStreamInfo.hostApiType =
+        paWASAPI;
+
+    wasapiStreamInfo.version = 1;
+
+    wasapiStreamInfo.flags = 0;
+
+    wasapiStreamInfo.streamOption =
+        eStreamOptionRaw;
+
+
+    // ========================================================
     // PARÁMETROS DE ENTRADA
     // ========================================================
 
     PaStreamParameters inputParameters{};
 
-    inputParameters.device = inputDevice;
+    inputParameters.device =
+        inputDevice;
 
-    inputParameters.channelCount = CHANNELS;
+    inputParameters.channelCount =
+        CHANNELS;
 
-    inputParameters.sampleFormat = paFloat32;
+    inputParameters.sampleFormat =
+        paFloat32;
 
     inputParameters.suggestedLatency =
         deviceInfo->defaultLowInputLatency;
 
     inputParameters.hostApiSpecificStreamInfo =
-        nullptr;
+        &wasapiStreamInfo;
 
 
     // ========================================================
@@ -225,10 +307,51 @@ int AudioController::audioCallback(
     const auto* inputSamples =
         static_cast<const float*>(input);
 
+
+    // ========================================================
+    // DIAGNÓSTICO DE LA SEÑAL RECIBIDA
+    // ========================================================
+
+    static double accumulatedSquared = 0.0;
+
+    static float minimum =
+        std::numeric_limits<float>::max();
+
+    static float maximum =
+        std::numeric_limits<float>::lowest();
+
+    static unsigned long accumulatedSamples = 0;
+
+    static int callbackCount = 0;
+
     for (unsigned long i = 0;
          i < frameCount;
          ++i)
     {
+        const float sample =
+            inputSamples[i];
+
+        accumulatedSquared +=
+            static_cast<double>(sample) *
+            static_cast<double>(sample);
+
+        if (sample < minimum)
+        {
+            minimum = sample;
+        }
+
+        if (sample > maximum)
+        {
+            maximum = sample;
+        }
+
+        ++accumulatedSamples;
+
+
+        // ====================================================
+        // GUARDAR MUESTRA
+        // ====================================================
+
         const int index =
             audioData->writeIndex.fetch_add(
                 1,
@@ -236,9 +359,52 @@ int AudioController::audioCallback(
             ) % WAVEFORM_SAMPLES;
 
         audioData->samples[index].store(
-            inputSamples[i],
+            sample,
             std::memory_order_relaxed
         );
+    }
+
+
+    // ========================================================
+    // REPORTAR APROXIMADAMENTE CADA SEGUNDO
+    // ========================================================
+
+    ++callbackCount;
+
+    if (callbackCount >=
+        SAMPLE_RATE / FRAMES_PER_BUFFER)
+    {
+        const double rms =
+            accumulatedSamples > 0
+                ? std::sqrt(
+                    accumulatedSquared /
+                    static_cast<double>(
+                        accumulatedSamples
+                    )
+                )
+                : 0.0;
+
+        std::cout
+            << "Audio recibido | "
+            << "RMS: "
+            << rms
+            << " | Min: "
+            << minimum
+            << " | Max: "
+            << maximum
+            << '\n';
+
+        accumulatedSquared = 0.0;
+
+        minimum =
+            std::numeric_limits<float>::max();
+
+        maximum =
+            std::numeric_limits<float>::lowest();
+
+        accumulatedSamples = 0;
+
+        callbackCount = 0;
     }
 
     return paContinue;
@@ -258,7 +424,9 @@ void AudioController::copyLatestSamples(
             std::memory_order_relaxed
         );
 
-    for (int i = 0; i < sampleCount; ++i)
+    for (int i = 0;
+         i < sampleCount;
+         ++i)
     {
         const int index =
             (

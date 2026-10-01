@@ -9,7 +9,7 @@
 // CONFIGURACIÓN DE AUDIO
 // ============================================================
 
-constexpr int SAMPLE_RATE = 44100;
+constexpr int SAMPLE_RATE = 48000;
 constexpr int FRAMES_PER_BUFFER = 256;
 constexpr int CHANNELS = 1;
 
