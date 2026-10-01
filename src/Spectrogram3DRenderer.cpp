@@ -13,6 +13,10 @@ namespace
     constexpr int COLUMN_STEP = 4;
     constexpr int BIN_STEP = 4;
 
+    constexpr float GRAPH_TILT_DEGREES = 30.0f;
+    constexpr float GRAPH_Y_OFFSET = 1.0f;
+
+
     struct Matrix4
     {
         float value[16]{};
@@ -201,6 +205,78 @@ namespace
 
         return result;
     }
+
+
+    Matrix4 rotationXMatrix(
+        float angleRadians
+    )
+    {
+        Matrix4 result =
+            identityMatrix();
+
+        const float cosine =
+            std::cos(angleRadians);
+
+        const float sine =
+            std::sin(angleRadians);
+
+        result.value[5] = cosine;
+        result.value[6] = sine;
+
+        result.value[9] = -sine;
+        result.value[10] = cosine;
+
+        return result;
+    }
+
+
+    Matrix4 translationMatrix(
+        float x,
+        float y,
+        float z
+    )
+    {
+        Matrix4 result =
+            identityMatrix();
+
+        result.value[12] = x;
+        result.value[13] = y;
+        result.value[14] = z;
+
+        return result;
+    }
+
+
+    Matrix4 multiplyMatrix(
+        const Matrix4& a,
+        const Matrix4& b
+    )
+    {
+        Matrix4 result{};
+
+        for (int column = 0; column < 4; ++column)
+        {
+            for (int row = 0; row < 4; ++row)
+            {
+                result.value[
+                    column * 4 + row
+                ] =
+                    a.value[0 * 4 + row] *
+                    b.value[column * 4 + 0] +
+
+                    a.value[1 * 4 + row] *
+                    b.value[column * 4 + 1] +
+
+                    a.value[2 * 4 + row] *
+                    b.value[column * 4 + 2] +
+
+                    a.value[3 * 4 + row] *
+                    b.value[column * 4 + 3];
+            }
+        }
+
+        return result;
+    }
 }
 
 
@@ -331,9 +407,6 @@ void Spectrogram3DRenderer::createMesh()
                 height - 1
             );
 
-
-        // Frecuencias bajas quedan lejos.
-        // Frecuencias altas quedan cerca.
 
         const float positionZ =
             (
@@ -618,20 +691,6 @@ void Spectrogram3DRenderer::update(
             );
 
 
-        // ====================================================
-        // FRECUENCIA
-        // ====================================================
-        //
-        // bin 0
-        //     frecuencia más baja
-        //     queda lejos
-        //
-        // bin máximo
-        //     frecuencia más alta
-        //     queda cerca
-        //
-        // ====================================================
-
         const float positionZ =
             (
                 0.5f -
@@ -646,36 +705,6 @@ void Spectrogram3DRenderer::update(
             ++x
         )
         {
-            // =================================================
-            // POSICIÓN TEMPORAL
-            // =================================================
-            //
-            // x = 0 representa el pasado más antiguo.
-            //
-            // x = meshWidth - 1 representa el instante más
-            // reciente.
-            //
-            // currentColumn es la siguiente posición que será
-            // escrita por el espectrograma 2D.
-            //
-            // Por eso comenzamos leyendo desde currentColumn.
-            //
-            // Ejemplo:
-            //
-            // memoria:
-            //
-            //       0  1  2  3  4  5  6  7
-            //       └───────────────┘
-            //
-            // currentColumn = 5
-            //
-            // orden temporal:
-            //
-            //       5  6  7  0  1  2  3  4
-            //       antiguo       →       reciente
-            //
-            // =================================================
-
             const int temporalColumn =
                 std::min(
                     x * COLUMN_STEP,
@@ -707,10 +736,6 @@ void Spectrogram3DRenderer::update(
                 ) *
                 WIDTH_SCALE;
 
-
-            // =================================================
-            // DATOS DEL ESPECTROGRAMA
-            // =================================================
 
             const int dataIndex =
                 sourceBin *
@@ -794,7 +819,7 @@ void Spectrogram3DRenderer::render(
     );
 
 
-    const Matrix4 view =
+    const Matrix4 cameraView =
         lookAtMatrix(
             0.0f,
             5.0f,
@@ -802,6 +827,40 @@ void Spectrogram3DRenderer::render(
             0.0f,
             0.7f,
             0.0f
+        );
+
+
+    const float tiltRadians =
+        GRAPH_TILT_DEGREES *
+        3.14159265358979323846f /
+        180.0f;
+
+
+    const Matrix4 rotation =
+        rotationXMatrix(
+            tiltRadians
+        );
+
+
+    const Matrix4 translation =
+        translationMatrix(
+            0.0f,
+            GRAPH_Y_OFFSET,
+            0.0f
+        );
+
+
+    const Matrix4 model =
+        multiplyMatrix(
+            translation,
+            rotation
+        );
+
+
+    const Matrix4 view =
+        multiplyMatrix(
+            cameraView,
+            model
         );
 
 

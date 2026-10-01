@@ -27,6 +27,13 @@ void main()
             0.15
         );
 
+    vec3 peak =
+        vec3(
+            1.0,
+            0.05,
+            0.0
+        );
+
     float adjustedIntensity =
         pow(
             clamp(intensity, 0.0, 1.0),
@@ -44,13 +51,22 @@ void main()
                 adjustedIntensity * 2.0
             );
     }
-    else
+    else if (adjustedIntensity < 0.8)
     {
         color =
             mix(
                 middle,
                 high,
-                (adjustedIntensity - 0.5) * 2.0
+                (adjustedIntensity - 0.5) / 0.3
+            );
+    }
+    else
+    {
+        color =
+            mix(
+                high,
+                peak,
+                (adjustedIntensity - 0.8) / 0.2
             );
     }
 
